@@ -54,13 +54,15 @@ function addon.GetQuestItem(questID)
     end
 end
 
-local function ReadQuest(quest, questID, money)
+local function ReadQuest(questID, money)
     local ready = C_QuestLog.ReadyForTurnIn(questID)
     if ready == nil then
         ready = C_QuestLog.IsComplete(questID)
     end
 
-    local title = quest.title
+    local logIndex = C_QuestLog.GetLogIndexForQuestID(questID)
+    local info = logIndex and C_QuestLog.GetInfo(logIndex)
+    local title = info and info.title
     if not title or title == "" then
         title = C_QuestLog.GetTitleForQuestID(questID)
     end
@@ -69,14 +71,15 @@ local function ReadQuest(quest, questID, money)
     end
 
     local moneyText
-    if quest.requiredMoney and quest.requiredMoney > money and not ready then
-        moneyText = GetMoneyString(money) .. " / " .. GetMoneyString(quest.requiredMoney)
+    local requiredMoney = C_QuestLog.GetRequiredMoney(questID)
+    if requiredMoney and requiredMoney > money and not ready then
+        moneyText = GetMoneyString(money) .. " / " .. GetMoneyString(requiredMoney)
     end
 
     return {
         id = questID,
         title = title,
-        level = quest.level,
+        level = info and info.level,
         ready = ready,
         objectives = C_QuestLog.GetQuestObjectives(questID) or {},
         item = addon.GetQuestItem(questID),
@@ -84,26 +87,23 @@ local function ReadQuest(quest, questID, money)
     }
 end
 
-function addon.GetGroups(nativeModules)
+function addon.GetGroups()
     local groups, groupsByKey, seen = {}, {}, {}
     local money = GetMoney()
 
-    -- Use the exact watch list and eligibility rules of the section we replace.
-    for _, module in ipairs(nativeModules) do
-        for _, watch in ipairs(module:BuildQuestWatchInfos()) do
-            local quest = watch.quest
-            local questID = quest:GetID()
-            if not seen[questID] then
-                seen[questID] = true
-                local key, name = GetGroup(questID)
-                local group = groupsByKey[key]
-                if not group then
-                    group = { key = key, name = name, quests = {} }
-                    groupsByKey[key] = group
-                    groups[#groups + 1] = group
-                end
-                group.quests[#group.quests + 1] = ReadQuest(quest, questID, money)
+    for i = 1, C_QuestLog.GetNumQuestWatches() do
+        local questID = C_QuestLog.GetQuestIDForQuestWatchIndex(i)
+        if questID and not seen[questID] and not C_QuestLog.IsQuestTask(questID)
+            and not C_QuestLog.IsQuestBounty(questID) and not C_QuestLog.IsQuestDisabledForSession(questID) then
+            seen[questID] = true
+            local key, name = GetGroup(questID)
+            local group = groupsByKey[key]
+            if not group then
+                group = { key = key, name = name, quests = {} }
+                groupsByKey[key] = group
+                groups[#groups + 1] = group
             end
+            group.quests[#group.quests + 1] = ReadQuest(questID, money)
         end
     end
 

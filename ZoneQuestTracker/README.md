@@ -12,7 +12,9 @@ ZoneQuestTracker groups watched quests by zone in the right-side Objective Track
 
 The addon uses the quest log’s category, then the quest’s destination zone, then **Other**. Each watched quest has one row even if it sends you to several zones. Zone collapse state is saved per character. The display refreshes after combat. Click quest titles out of combat.
 
-The grouped display takes the place of Blizzard’s quest and campaign watch sections. When Blizzard provides a quest item, its icon appears to the right of the first objective or status line. Hover over it for the tooltip. An item button already in place when combat begins can still be left-clicked during combat. Button placement and item assignments refresh after combat. The icon turns gray when the client reports the item is unavailable, on cooldown, or out of range. The game still checks quest-specific conditions when you use the item, such as whether the target is wounded enough for the Phantasmal Blade.
+The grouped display appears over Blizzard’s quest and campaign watch sections and follows their position. Blizzard still controls the space its sections reserve. Edit Mode shows the stock tracker so you can adjust it there.
+
+When Blizzard provides a quest item, its icon appears to the right of the first objective or status line. Hover over it for the tooltip. An item button already in place when combat begins can still be left-clicked during combat. Button placement and item assignments refresh after combat. The icon turns gray when the client reports the item is unavailable, on cooldown, or out of range. The game still checks quest-specific conditions when you use the item, such as whether the target is wounded enough for the Phantasmal Blade.
 
 The grouped display supports mouse controls. Blizzard’s auto-quest popups, quest-row context menus, and gamepad navigation for quest rows are unavailable in this display.
 
@@ -28,6 +30,7 @@ The grouped display supports mouse controls. Blizzard’s auto-quest popups, que
 - [ ] With quests as the only tracker content, use Blizzard’s main tracker minimize button and expand it again. Then track an achievement or another nonquest objective to check that it still uses its own section.
 - [ ] With the tracker crowded, scroll over the grouped list and check that the last quest is reachable. Enter and exit combat and check for Lua errors or blocked-action messages.
 - [ ] With several zones expanded and enough quests to fill the tracker, exit WoW and log in again. Verify the tracker uses the available height and the last quest is reachable without `/reload`. Repeat after changing the tracker height in Edit Mode or changing the UI scale.
+- [ ] With quests tracked, enter combat and switch stance or form. Confirm the action bars and Objective Tracker can update without a blocked `SetHeight` action. Open Edit Mode out of combat, move the tracker, then exit and confirm the grouped list follows it.
 
 ## Compatibility review
 

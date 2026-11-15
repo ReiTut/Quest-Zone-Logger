@@ -1,10 +1,11 @@
 ## Interface: 16001
 ## Title: ZoneQuestTracker
 ## Notes: Groups the Objective Tracker's watched quests by quest log zone.
-## Version: 1.0.8
+## Version: 1.0.9
 ## Dependencies: Blizzard_ObjectiveTracker
 ## SavedVariablesPerCharacter: ZoneQuestTrackerDB
 
 Quests.lua
 QuestItems.lua
+TrackerPlacement.lua
 Tracker.lua

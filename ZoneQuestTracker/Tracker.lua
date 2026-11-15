@@ -1,9 +1,10 @@
 local addonName, addon = ...
 
 local events = CreateFrame("Frame")
-local tracker, nativeModules, section, collapsedZones
+local section, collapsedZones
 local enteredWorld, refreshQueued, disabled
 local QueueRefresh
+local PLACEMENT_INTERVAL = 0.10
 local FOCUS_BUTTON_SIZE = 22
 local SCROLL_LEFT_GUTTER = 24
 local ZONE_QUEST_PADDING = 14
@@ -27,6 +28,9 @@ local function CreateFocusButton(row)
     -- The section already refreshes focus on SUPER_TRACKING_CHANGED.
     button:SetScript("OnShow", nil)
     button:SetScript("OnHide", nil)
+    function button:GetQuestClassification()
+        return C_QuestInfoSystem.GetQuestClassification(self:GetQuestID())
+    end
     button:SetScript("OnClick", function(self)
         local questID = self:GetParent().questID
         if questID and not InCombatLockdown() and C_QuestLog.GetQuestWatchType(questID) then
@@ -175,6 +179,8 @@ local function Render(module, groups)
         rows[i]:Hide()
     end
     module.fullHeight = y
+    module.placementElapsed = PLACEMENT_INTERVAL
+    module.viewportDirty = true
     child:SetSize(math.max(width, 1) + SCROLL_LEFT_GUTTER, math.max(y, 1))
 end
 
@@ -199,8 +205,7 @@ local function SyncViewport(module)
         return
     end
 
-    -- Blizzard anchors the module after calling module:Update(). Rebuild the
-    -- scroll rectangle once the visible viewport has its final coordinates.
+    -- Rebuild the scroll rectangle once the viewport adopts the new size.
     local offset = view:GetVerticalScroll()
     view:UpdateScrollChildRect()
     UpdateScroll(module, offset)
@@ -208,13 +213,20 @@ local function SyncViewport(module)
 end
 
 local function CreateSection(container, stock)
-    local module = CreateFrame("Frame", nil, container)
+    -- Keep addon frames and layout callbacks out of Blizzard's module list.
+    local module = CreateFrame("Frame", nil, UIParent)
     module:Hide()
     module:SetSize(stock:GetWidth(), 1)
-    module.uiOrder = stock.uiOrder
-    module.leftMargin = stock.leftMargin
-    module.hasDisplayPriority = stock.hasDisplayPriority
+    module:SetFrameStrata("MEDIUM")
+    module:SetFrameLevel(10)
+    module.container = container
+    module.stockQuests = { [stock] = { stock = stock } }
+    local campaign = CampaignQuestObjectiveTracker
+    if campaign then
+        module.stockQuests[campaign] = { stock = campaign }
+    end
     module.rows = {}
+    module.placementElapsed = 0
     module.itemButtons, module.itemElapsed = {}, 0
     module.contentsHeight, module.fullHeight = 0, 0
 
@@ -242,106 +254,20 @@ local function CreateSection(container, stock)
     module.thumb:SetWidth(2)
     module.thumb:Hide()
 
-    -- The tracker container assigns the module's position using this contract.
-    function module:SetContainer(parent)
-        self.container = parent
-    end
-
-    function module:Update(availableHeight)
-        if not InCombatLockdown() then
-            if not self.didInitialLayout then
-                self.didInitialLayout = true
-                self.layoutDirty = true
-            end
-            self.contentsHeight = math.max(0, math.min(self.fullHeight, availableHeight))
-            for _, native in ipairs(nativeModules) do
-                if self.container:HasModule(native) then
-                    self.contentsHeight = 0
-                    break
-                end
-            end
-
-            local minimized = self.container:IsCollapsed()
-            local showRows = self.contentsHeight > 0 and not minimized
-            if showRows then
-                self:SetHeight(self.contentsHeight)
-                self.viewportDirty = true
-            elseif self.contentsHeight > 0 then
-                -- Keep the container's expand control visible when quests are its only content.
-                self.contentsHeight = 1
-                self:SetHeight(1)
-            end
-            self:SetShown(showRows)
-        end
-        return self.contentsHeight, false
-    end
-
-    function module:GetContentsHeight()
-        return self.contentsHeight
-    end
-
-    function module:IsTruncated()
-        return false -- Oversized quest lists scroll within this section.
-    end
-
-    function module:MatchesTag()
-        return false -- Blizzard's tag queries expect its own block types.
-    end
-
-    -- A resize during Blizzard's layout pass can share that pass's dirty flag.
-    -- Request another pass only after the native handler has finished.
-    local function InvalidateLayout()
-        module.layoutDirty = true
-    end
-    container:HookScript("OnSizeChanged", InvalidateLayout)
-    container:HookScript("OnShow", InvalidateLayout)
-
     return module
 end
 
 local function Refresh()
     if not section then
-        tracker = ObjectiveTrackerFrame
-        local native = QuestObjectiveTracker
-        if not tracker or not native or type(tracker.HasModule) ~= "function"
-            or type(tracker.AddModule) ~= "function" or type(tracker.RemoveModule) ~= "function"
-            or type(tracker.MarkDirty) ~= "function" or type(tracker.IsCollapsed) ~= "function"
-            or type(native.BuildQuestWatchInfos) ~= "function" or type(native.Update) ~= "function"
-            or not tracker:HasModule(native) then
-            return
-        end
-
-        nativeModules = { native }
-        local campaign = CampaignQuestObjectiveTracker
-        if campaign and tracker:HasModule(campaign) then
-            nativeModules[#nativeModules + 1] = campaign
-        end
-
-        local groups = addon.GetGroups(nativeModules)
-        section = CreateSection(tracker, native)
-        Render(section, groups)
-        tracker:AddModule(section)
-        for _, stock in ipairs(nativeModules) do
-            tracker:RemoveModule(stock)
-            -- Release the stock quest blocks and clear their layout state.
-            stock:Update(0, false)
-        end
-    else
-        Render(section, addon.GetGroups(nativeModules))
+        section = CreateSection(ObjectiveTrackerFrame, QuestObjectiveTracker)
     end
-    tracker:MarkDirty()
+    Render(section, addon.GetGroups())
 end
 
 local function RestoreNative(message)
     disabled = true
     if section then
-        tracker:RemoveModule(section)
-        section:Hide()
-    end
-    for _, stock in ipairs(nativeModules or {}) do
-        if not tracker:HasModule(stock) then
-            tracker:AddModule(stock)
-        end
+        addon.HideTracker(section)
     end
     geterrorhandler()(addonName .. ": " .. tostring(message))
 end
@@ -380,7 +306,7 @@ events:SetScript("OnEvent", function(_, event, name)
         enteredWorld = true
     elseif event == "DISPLAY_SIZE_CHANGED" or event == "UI_SCALE_CHANGED" or event == "EDIT_MODE_LAYOUTS_UPDATED" then
         if section then
-            section.layoutDirty = true
+            section.placementElapsed = PLACEMENT_INTERVAL
             section.viewportDirty = true
         end
         return
@@ -394,12 +320,18 @@ events:SetScript("OnUpdate", function(_, elapsed)
     if not section then
         return
     end
-    if not disabled and not InCombatLockdown() then
-        if section.layoutDirty then
-            section.layoutDirty = false
-            tracker:MarkDirty()
+    if not disabled then
+        section.placementElapsed = section.placementElapsed + elapsed
+        if section.placementElapsed >= PLACEMENT_INTERVAL then
+            section.placementElapsed = 0
+            local ok, message = pcall(addon.PlaceTracker, section)
+            if not ok then
+                RestoreNative(message)
+            end
         end
-        SyncViewport(section)
+        if not InCombatLockdown() then
+            SyncViewport(section)
+        end
     end
     if #section.itemButtons > 0 then
         addon.UpdateItemButtons(section, elapsed)
