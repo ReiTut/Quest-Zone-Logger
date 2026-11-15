@@ -7,8 +7,7 @@ local QueueRefresh
 local FOCUS_BUTTON_SIZE = 22
 local SCROLL_LEFT_GUTTER = 24
 local ZONE_QUEST_PADDING = 14
-local QUEST_ITEM_SIZE = 18
-local QUEST_ITEM_TEXT_GAP = 6
+local QUEST_ITEM_INSET = addon.QuestItemSize + 6
 
 local function OnRowClick(row)
     if row.zoneKey then
@@ -54,77 +53,6 @@ local function UpdateFocusButton(row, quest, focusedQuestID)
     button:SetStyle(quest.ready and style.QuestComplete or style.QuestInProgress)
     button:SetSelected(quest.id == focusedQuestID)
     button:UpdateButtonStyle()
-    button:Show()
-end
-
-local function HideItemTooltip(button)
-    if GameTooltip:IsOwned(button) then
-        GameTooltip:Hide()
-    end
-end
-
-local function CreateItemButton(row)
-    -- This Blizzard template performs the item action on click outside combat.
-    -- It keeps the tracker container free of protected child frames.
-    local button = CreateFrame("Button", nil, row, "InsecureActionButtonTemplate")
-    button:SetSize(QUEST_ITEM_SIZE, QUEST_ITEM_SIZE)
-    button:SetPoint("TOPRIGHT", row, "TOPRIGHT", -2, 0)
-    button:RegisterForClicks("LeftButtonUp")
-    button:SetAttribute("useOnKeyDown", false)
-    button:SetAttribute("type1", "item")
-
-    local border = button:CreateTexture(nil, "BACKGROUND")
-    border:SetAllPoints()
-    border:SetColorTexture(0.69, 0.50, 0.21, 0.9)
-    button.icon = button:CreateTexture(nil, "ARTWORK")
-    button.icon:SetPoint("TOPLEFT", 1, -1)
-    button.icon:SetPoint("BOTTOMRIGHT", -1, 1)
-    button:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
-
-    button:SetScript("OnEnter", function(self)
-        if self.item then
-            GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-            GameTooltip:SetHyperlink(self.item.link)
-            GameTooltip:Show()
-        end
-    end)
-    button:SetScript("OnLeave", HideItemTooltip)
-    button:SetScript("OnHide", HideItemTooltip)
-    button:SetScript("PreClick", function(self)
-        if InCombatLockdown() then
-            return
-        end
-        local questID = self.questID
-        local current = questID and C_QuestLog.GetQuestWatchType(questID) and addon.GetQuestItem(questID)
-        if not current or not self.item or current.id ~= self.item.id then
-            self:SetAttribute("item1", nil)
-            QueueRefresh()
-        end
-    end)
-
-    row.itemButton = button
-    return button
-end
-
-local function UpdateItemButton(row, quest)
-    local button = row.itemButton
-    if not quest then
-        if button and button.item then
-            button.item, button.questID = nil, nil
-            button:SetAttribute("item1", nil)
-            button:Hide()
-        end
-        return
-    end
-
-    local item = quest.item
-    button = button or CreateItemButton(row)
-    if button.item and button.item.link ~= item.link then
-        HideItemTooltip(button)
-    end
-    button.item, button.questID = item, quest.id
-    button:SetAttribute("item1", "item:" .. item.id)
-    button.icon:SetTexture(item.icon)
     button:Show()
 end
 
@@ -175,13 +103,13 @@ local function Render(module, groups)
 
         local focusQuest = showFocusButtons and quest
         UpdateFocusButton(row, focusQuest, focusedQuestID)
-        UpdateItemButton(row, itemQuest)
+        addon.UpdateItemButton(module, row, itemQuest, SCROLL_LEFT_GUTTER + width, y)
 
         local label = row.text
         label:SetFontObject(zoneKey and "ObjectiveTrackerHeaderFont" or "ObjectiveTrackerLineFont")
         label:ClearAllPoints()
         label:SetPoint("TOPLEFT", row, "TOPLEFT", indent, -3)
-        local rightInset = itemQuest and (QUEST_ITEM_SIZE + QUEST_ITEM_TEXT_GAP) or 4
+        local rightInset = itemQuest and QUEST_ITEM_INSET or 4
         label:SetWidth(width - indent - rightInset)
         label:SetText(text)
         if zoneKey or quest then
@@ -243,7 +171,7 @@ local function Render(module, groups)
     end
 
     for i = index + 1, #rows do
-        UpdateItemButton(rows[i])
+        addon.UpdateItemButton(module, rows[i])
         rows[i]:Hide()
     end
     module.fullHeight = y
@@ -264,6 +192,21 @@ local function UpdateScroll(module, offset)
     end
 end
 
+local function SyncViewport(module)
+    local view = module.view
+    if not module.viewportDirty or not view:IsVisible() or not view:GetTop()
+        or math.abs(view:GetHeight() - module.contentsHeight) > 0.5 then
+        return
+    end
+
+    -- Blizzard anchors the module after calling module:Update(). Rebuild the
+    -- scroll rectangle once the visible viewport has its final coordinates.
+    local offset = view:GetVerticalScroll()
+    view:UpdateScrollChildRect()
+    UpdateScroll(module, offset)
+    module.viewportDirty = false
+end
+
 local function CreateSection(container, stock)
     local module = CreateFrame("Frame", nil, container)
     module:Hide()
@@ -272,12 +215,18 @@ local function CreateSection(container, stock)
     module.leftMargin = stock.leftMargin
     module.hasDisplayPriority = stock.hasDisplayPriority
     module.rows = {}
+    module.itemButtons, module.itemElapsed = {}, 0
     module.contentsHeight, module.fullHeight = 0, 0
 
     local view = CreateFrame("ScrollFrame", nil, module)
     -- Extend the clip area for the marker glow. The row inset keeps the text in place.
     view:SetPoint("TOPLEFT", module, "TOPLEFT", -SCROLL_LEFT_GUTTER, 0)
     view:SetPoint("BOTTOMRIGHT", module, "BOTTOMRIGHT", 0, 0)
+    local function InvalidateViewport()
+        module.viewportDirty = true
+    end
+    view:SetScript("OnShow", InvalidateViewport)
+    view:SetScript("OnSizeChanged", InvalidateViewport)
     view:EnableMouseWheel(true)
     view:SetScript("OnMouseWheel", function(self, delta)
         if not InCombatLockdown() then
@@ -300,6 +249,10 @@ local function CreateSection(container, stock)
 
     function module:Update(availableHeight)
         if not InCombatLockdown() then
+            if not self.didInitialLayout then
+                self.didInitialLayout = true
+                self.layoutDirty = true
+            end
             self.contentsHeight = math.max(0, math.min(self.fullHeight, availableHeight))
             for _, native in ipairs(nativeModules) do
                 if self.container:HasModule(native) then
@@ -312,8 +265,7 @@ local function CreateSection(container, stock)
             local showRows = self.contentsHeight > 0 and not minimized
             if showRows then
                 self:SetHeight(self.contentsHeight)
-                self.view:UpdateScrollChildRect()
-                UpdateScroll(self, self.view:GetVerticalScroll())
+                self.viewportDirty = true
             elseif self.contentsHeight > 0 then
                 -- Keep the container's expand control visible when quests are its only content.
                 self.contentsHeight = 1
@@ -335,6 +287,14 @@ local function CreateSection(container, stock)
     function module:MatchesTag()
         return false -- Blizzard's tag queries expect its own block types.
     end
+
+    -- A resize during Blizzard's layout pass can share that pass's dirty flag.
+    -- Request another pass only after the native handler has finished.
+    local function InvalidateLayout()
+        module.layoutDirty = true
+    end
+    container:HookScript("OnSizeChanged", InvalidateLayout)
+    container:HookScript("OnShow", InvalidateLayout)
 
     return module
 end
@@ -418,14 +378,37 @@ events:SetScript("OnEvent", function(_, event, name)
         events:UnregisterEvent("ADDON_LOADED")
     elseif event == "PLAYER_ENTERING_WORLD" then
         enteredWorld = true
+    elseif event == "DISPLAY_SIZE_CHANGED" or event == "UI_SCALE_CHANGED" or event == "EDIT_MODE_LAYOUTS_UPDATED" then
+        if section then
+            section.layoutDirty = true
+            section.viewportDirty = true
+        end
+        return
     elseif event == "CVAR_UPDATE" and name:lower() ~= "questpoi" then
         return
     end
     QueueRefresh()
 end)
 
+events:SetScript("OnUpdate", function(_, elapsed)
+    if not section then
+        return
+    end
+    if not disabled and not InCombatLockdown() then
+        if section.layoutDirty then
+            section.layoutDirty = false
+            tracker:MarkDirty()
+        end
+        SyncViewport(section)
+    end
+    if #section.itemButtons > 0 then
+        addon.UpdateItemButtons(section, elapsed)
+    end
+end)
+
 for _, event in ipairs({
     "ADDON_LOADED", "VARIABLES_LOADED", "PLAYER_ENTERING_WORLD", "PLAYER_REGEN_ENABLED",
+    "DISPLAY_SIZE_CHANGED", "UI_SCALE_CHANGED", "EDIT_MODE_LAYOUTS_UPDATED",
     "QUEST_ACCEPTED", "QUEST_REMOVED", "QUEST_TURNED_IN", "QUEST_DATA_LOAD_RESULT",
     "QUEST_LOG_UPDATE", "QUEST_LOG_CRITERIA_UPDATE", "QUEST_WATCH_LIST_CHANGED", "QUEST_WATCH_UPDATE",
     "QUEST_POI_UPDATE", "SUPER_TRACKING_CHANGED", "CVAR_UPDATE", "PLAYER_MONEY", "BAG_UPDATE_DELAYED",

@@ -19,7 +19,7 @@ The addon targets **WoW Forever 1.60.1 (Camelot)**, interface `16001`.
 | **Zone header** | Expand or collapse the zone. The header and quest count stay visible, and your quests stay tracked. |
 | **Quest title** | Open the quest details out of combat. The title shows the quest level when available. |
 | **Circle beside a quest** | Focus the quest on the map out of combat. Click again to clear the focus. The circle follows Blizzard’s **Quest Points of Interest** setting. |
-| **Quest-item icon** | Hover to identify the item. Left-click out of combat to use it from the tracker. When Blizzard provides a usable item, its icon appears to the right of the first objective or status line. |
+| **Quest-item icon** | Hover to identify the item. Left-click to use it from the tracker, including during combat if the button was already in place and the game allows the item. The icon turns gray when the game reports the item is unavailable, on cooldown, or out of range. |
 | **Mouse wheel** | Scroll when the list fills the available tracker space. |
 
 Use Blizzard’s quest log to track or untrack quests. ZoneQuestTracker shows objective progress and when a quest is ready to turn in. Each watched quest appears once, under its quest-log category, its destination zone, or **Other**.
