@@ -36,30 +36,33 @@ local function Position(frame, left, top, width, height, scale)
     return true
 end
 
-local function RestoreStock(entry)
-    if entry.alpha ~= nil then
+local function RestoreStock(entry, inCombat)
+    if entry.shield then
+        entry.shield:Hide()
+    end
+    if entry.alpha ~= nil and not inCombat then
         local alpha = entry.stock:GetAlpha()
-        if not issecretvalue(alpha) and alpha == 0 then
-            entry.stock:SetAlpha(entry.alpha)
-        end
-        entry.alpha = nil
-        if entry.shield then
-            entry.shield:Hide()
+        if not issecretvalue(alpha) then
+            if alpha == 0 then
+                entry.stock:SetAlpha(entry.alpha)
+            end
+            entry.alpha = nil
         end
     end
 end
 
 function addon.HideTracker(section)
     section:Hide()
+    local inCombat = InCombatLockdown()
     for _, entry in pairs(section.stockQuests) do
-        RestoreStock(entry)
+        RestoreStock(entry, inCombat)
     end
 end
 
-local function SuppressStock(entry, bounds, rootLeft, rootBottom)
-    local alpha = entry.stock:GetAlpha()
-    if alpha ~= 0 then
-        entry.alpha = alpha
+local function SuppressStock(entry, bounds, rootLeft, rootBottom, inCombat)
+    -- The quest module can become protected when it displays a usable item.
+    if not inCombat and entry.stockAlpha ~= 0 then
+        entry.alpha = entry.stockAlpha
         entry.stock:SetAlpha(0)
     end
 
@@ -79,6 +82,7 @@ end
 
 function addon.PlaceTracker(section)
     local tracker = section.container
+    local inCombat = InCombatLockdown()
     if section.fullHeight <= 0 or tracker:IsCollapsed()
         or (EditModeManagerFrame and EditModeManagerFrame:IsEditModeActive()) then
         addon.HideTracker(section)
@@ -104,6 +108,12 @@ function addon.PlaceTracker(section)
         local bounds = tracker:HasModule(stock) and ReadBounds(stock, rootScale)
         local alpha = stock:GetAlpha()
         if bounds and not issecretvalue(alpha) and (alpha ~= 0 or entry.alpha ~= nil) then
+            -- If Blizzard restores its quest rows during combat, leave them visible until regen.
+            if inCombat and alpha ~= 0 then
+                addon.HideTracker(section)
+                return
+            end
+            entry.stockAlpha = alpha
             entry.bounds = bounds
             if not first or bounds.top > first.top then
                 first = bounds
@@ -141,9 +151,9 @@ function addon.PlaceTracker(section)
     section:Show()
     for _, entry in pairs(section.stockQuests) do
         if entry.bounds then
-            SuppressStock(entry, entry.bounds, rootLeft, rootBottom)
+            SuppressStock(entry, entry.bounds, rootLeft, rootBottom, inCombat)
         else
-            RestoreStock(entry)
+            RestoreStock(entry, inCombat)
         end
     end
 end

@@ -1,7 +1,9 @@
 ## Interface: 16001
 ## Title: ZoneQuestTracker
 ## Notes: Groups the Objective Tracker's watched quests by quest log zone.
-## Version: 1.0.9
+## Category: Quests
+## IconTexture: Interface\AddOns\ZoneQuestTracker\Icon.tga
+## Version: 1.0.11
 ## Dependencies: Blizzard_ObjectiveTracker
 ## SavedVariablesPerCharacter: ZoneQuestTrackerDB
 

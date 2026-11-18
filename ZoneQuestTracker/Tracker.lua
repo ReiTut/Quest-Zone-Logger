@@ -304,6 +304,13 @@ events:SetScript("OnEvent", function(_, event, name)
         events:UnregisterEvent("ADDON_LOADED")
     elseif event == "PLAYER_ENTERING_WORLD" then
         enteredWorld = true
+    elseif event == "PLAYER_REGEN_ENABLED" and section then
+        if disabled then
+            -- An error during lockdown can leave a native quest module faded until combat ends.
+            addon.HideTracker(section)
+            return
+        end
+        section.placementElapsed = PLACEMENT_INTERVAL
     elseif event == "DISPLAY_SIZE_CHANGED" or event == "UI_SCALE_CHANGED" or event == "EDIT_MODE_LAYOUTS_UPDATED" then
         if section then
             section.placementElapsed = PLACEMENT_INTERVAL
@@ -346,8 +353,4 @@ for _, event in ipairs({
     "QUEST_POI_UPDATE", "SUPER_TRACKING_CHANGED", "CVAR_UPDATE", "PLAYER_MONEY", "BAG_UPDATE_DELAYED",
 }) do
     events:RegisterEvent(event)
-end
-
-if CVarCallbackRegistry then
-    CVarCallbackRegistry:RegisterCallback("questPOI", QueueRefresh, events)
 end

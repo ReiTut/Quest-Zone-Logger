@@ -8,7 +8,7 @@ ZoneQuestTracker groups your watched quests by zone in the right-side Objective 
 
 1. Exit World of Warcraft and extract `ZoneQuestTracker.zip`.
 2. Copy the extracted `ZoneQuestTracker` folder into `World of Warcraft/_forever_/Interface/AddOns/`. The addon’s `.toc` should be at `World of Warcraft/_forever_/Interface/AddOns/ZoneQuestTracker/ZoneQuestTracker.toc`.
-3. Start WoW Forever and enable **ZoneQuestTracker** in the **AddOns** menu on the character selection screen.
+3. Start WoW Forever and enable **ZoneQuestTracker** under **Quests** in the **AddOns** menu on the character selection screen.
 
 The addon targets **WoW Forever 1.60.1 (Camelot)**, interface `16001`.
 
@@ -17,7 +17,7 @@ The addon targets **WoW Forever 1.60.1 (Camelot)**, interface `16001`.
 | Control | What it does |
 | --- | --- |
 | **Zone header** | Expand or collapse the zone. The header and quest count stay visible, and your quests stay tracked. |
-| **Quest title** | Open the quest details out of combat. The title shows the quest level when available. |
+| **Quest title** | Open the quest details beside the map in Blizzard’s **Map & Quest Log** out of combat. The map jumps to the quest’s location when map data is available. The title shows the quest level when available. |
 | **Circle beside a quest** | Focus the quest on the map out of combat. Click again to clear the focus. The circle follows Blizzard’s **Quest Points of Interest** setting. |
 | **Quest-item icon** | Hover to identify the item. Left-click to use it from the tracker, including during combat if the button was already in place and the game allows the item. The icon turns gray when the game reports the item is unavailable, on cooldown, or out of range. |
 | **Mouse wheel** | Scroll when the list fills the available tracker space. |
