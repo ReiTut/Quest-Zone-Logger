@@ -60,6 +60,13 @@ local function CreateItemButton(section, row)
     icon:SetPoint("TOPLEFT", 1, -1)
     icon:SetPoint("BOTTOMRIGHT", -1, 1)
 
+    local button = { marker = marker, icon = icon }
+    row.itemButton = button
+    section.itemButtons[#section.itemButtons + 1] = button
+    return button
+end
+
+local function CreateItemAction(button)
     -- Keep both the parent and anchor of the protected action off the tracker.
     local action = CreateFrame("Button", nil, UIParent, "SecureActionButtonTemplate")
     action:Hide()
@@ -74,7 +81,7 @@ local function CreateItemButton(section, row)
     blocker:EnableMouse(true)
     blocker:Hide()
 
-    local button = { marker = marker, icon = icon, action = action, blocker = blocker }
+    button.action, button.blocker = action, blocker
     action:SetScript("OnEnter", function(self)
         if button.item then
             GameTooltip:SetOwner(self, "ANCHOR_LEFT")
@@ -85,24 +92,20 @@ local function CreateItemButton(section, row)
     action:SetScript("OnLeave", HideTooltip)
     action:SetScript("OnHide", HideTooltip)
     action:SetScript("PreClick", function(self)
-        if not InCombatLockdown() and (not IsCurrentItem(button) or button.boundID ~= button.item.id) then
+        if not InCombatLockdown() and (not IsCurrentItem(button) or button.boundID ~= button.item.id
+            or button.boundQuestID ~= button.questID) then
             self:SetAttribute("item1", nil)
-            button.boundID = nil
+            button.boundID, button.boundQuestID = nil, nil
         end
     end)
-
-    row.itemButton = button
-    section.itemButtons[#section.itemButtons + 1] = button
-    return button
+    return action
 end
 
 function addon.UpdateItemButton(section, row, quest, right, y)
     local button = row.itemButton
     if not quest then
         if button and button.item then
-            button.item, button.questID, button.boundID = nil, nil, nil
-            button.action:SetAttribute("item1", nil)
-            button.action:Hide()
+            button.item, button.questID, button.current = nil, nil, nil
             button.marker:Hide()
         end
         return
@@ -112,7 +115,9 @@ function addon.UpdateItemButton(section, row, quest, right, y)
     button = button or CreateItemButton(section, row)
     if not button.item or button.item.id ~= item.id or button.questID ~= quest.id then
         button.current = nil
-        HideTooltip(button.action)
+        if button.action then
+            HideTooltip(button.action)
+        end
     end
     button.item, button.questID = item, quest.id
     button.right, button.y = right, y
@@ -139,52 +144,54 @@ function addon.UpdateItemButtons(section, elapsed)
     end
     local size = ITEM_SIZE * scale
     for _, button in ipairs(section.itemButtons) do
-        if button.item then
-            local action, marker = button.action, button.marker
-            local left, top
-            if viewLeft and viewTop and marker:IsVisible() then
-                local offset = button.y - scroll
-                if offset >= 0 and offset + ITEM_SIZE <= viewHeight then
-                    left = (viewLeft + button.right - ITEM_SIZE - 2) * scale - parentLeft
-                    top = (viewTop - offset) * scale - parentBottom
-                end
+        local action, marker = button.action, button.marker
+        local left, top
+        if button.item and viewLeft and viewTop and marker:IsVisible() then
+            local offset = button.y - scroll
+            if offset >= 0 and offset + ITEM_SIZE <= viewHeight then
+                left = (viewLeft + button.right - ITEM_SIZE - 2) * scale - parentLeft
+                top = (viewTop - offset) * scale - parentBottom
             end
-            local aligned = left and action:IsShown() and button.left == left and button.top == top
-                and button.size == size and button.boundID == button.item.id
+        end
+        local aligned = left and action and action:IsShown() and button.left == left and button.top == top
+            and button.size == size and button.boundID == button.item.id and button.boundQuestID == button.questID
 
-            if updateState or button.current == nil then
-                button.current = IsCurrentItem(button)
-                button.usable = button.current and IsUsable(button.item.id, inCombat)
-            end
+        if button.item and (updateState or button.current == nil) then
+            button.current = IsCurrentItem(button)
+            button.usable = button.current and IsUsable(button.item.id, inCombat)
+        end
 
-            if inCombat then
+        if inCombat then
+            if action then
                 local block = action:IsShown() and not (aligned and button.current)
                 button.blocker:SetShown(block)
                 if block then
                     HideTooltip(action)
                 end
-            else
-                if left and button.current then
-                    if not aligned then
-                        action:ClearAllPoints()
-                        action:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
-                        action:SetSize(size, size)
-                        action:SetFrameStrata(marker:GetFrameStrata())
-                        action:SetFrameLevel(marker:GetFrameLevel() + 1)
-                        button.blocker:SetFrameLevel(action:GetFrameLevel() + 1)
-                        action:SetAttribute("item1", "item:" .. button.item.id)
-                        button.left, button.top, button.size = left, top, size
-                        button.boundID = button.item.id
-                        action:Show()
-                        aligned = true
-                    end
-                else
-                    action:Hide()
-                    aligned = false
-                end
-                button.blocker:Hide()
             end
+        elseif left and button.current then
+            if not aligned then
+                action = action or CreateItemAction(button)
+                action:ClearAllPoints()
+                action:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+                action:SetSize(size, size)
+                action:SetFrameStrata(marker:GetFrameStrata())
+                action:SetFrameLevel(marker:GetFrameLevel() + 1)
+                button.blocker:SetFrameLevel(action:GetFrameLevel() + 1)
+                action:SetAttribute("item1", "item:" .. button.item.id)
+                button.left, button.top, button.size = left, top, size
+                button.boundID, button.boundQuestID = button.item.id, button.questID
+                action:Show()
+                aligned = true
+            end
+            button.blocker:Hide()
+        elseif action then
+            action:Hide()
+            button.blocker:Hide()
+            aligned = false
+        end
 
+        if button.item then
             local gray = not (aligned and button.usable)
             if button.gray ~= gray then
                 button.gray = gray

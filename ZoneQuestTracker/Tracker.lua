@@ -3,20 +3,101 @@ local addonName, addon = ...
 local events = CreateFrame("Frame")
 local section, collapsedZones
 local enteredWorld, refreshQueued, disabled
-local QueueRefresh
+local QueueRefresh, RedrawCachedGroups
+local pendingMapQuestID
 local PLACEMENT_INTERVAL = 0.10
 local FOCUS_BUTTON_SIZE = 22
 local SCROLL_LEFT_GUTTER = 24
 local ZONE_QUEST_PADDING = 14
 local QUEST_ITEM_INSET = addon.QuestItemSize + 6
 
-local function OnRowClick(row)
+local function IsInQuestLog(questID)
+    if not questID then
+        return false
+    end
+    local logIndex = C_QuestLog.GetLogIndexForQuestID(questID)
+    return logIndex ~= nil and logIndex > 0
+end
+
+local function IsCurrentQuestRow(row, questID)
+    return row.questID == questID and row:IsVisible() and IsInQuestLog(questID)
+end
+
+local function OpenQuestDetails(questID)
+    if QuestLogPopupDetailFrame and QuestLogPopupDetailFrame:IsShown() then
+        HideUIPanel(QuestLogPopupDetailFrame)
+    end
+    QuestMapFrame_OpenToQuestDetails(questID)
+end
+
+local function OpenQuestMenu(row, questID)
+    MenuUtil.CreateContextMenu(row, function(_, rootDescription)
+        local watched = C_QuestLog.GetQuestWatchType(questID) ~= nil
+
+        local function CanAct()
+            return not InCombatLockdown() and IsCurrentQuestRow(row, questID)
+        end
+
+        local function CanChangeWatch()
+            if (C_QuestLog.GetQuestWatchType(questID) ~= nil) ~= watched then
+                return false
+            end
+            if watched then
+                return QuestUtil.CanRemoveQuestWatch()
+            end
+            return C_QuestLog.GetNumQuestWatches() < Constants.QuestWatchConsts.MAX_QUEST_WATCHES
+        end
+
+        local function CanShare()
+            return IsInGroup() and C_QuestLog.IsPushableQuest(questID)
+        end
+
+        local function CanAbandon()
+            return C_QuestLog.CanAbandonQuest(questID)
+        end
+
+        local function AddAction(label, isEligible, action)
+            local button = rootDescription:CreateButton(label, function()
+                if CanAct() and isEligible() then
+                    action(questID)
+                end
+            end)
+            button:SetEnabled(CanAct() and isEligible())
+        end
+
+        AddAction(watched and "Untrack" or "Track", CanChangeWatch, QuestMapQuestOptions_TrackQuest)
+        AddAction("Share", CanShare, QuestUtil.ShareQuest)
+        AddAction("Abandon", CanAbandon, QuestMapQuestOptions_AbandonQuest)
+    end)
+end
+
+local function OnRowClick(row, mouseButton)
     if row.zoneKey then
-        local key = row.zoneKey
-        collapsedZones[key] = not collapsedZones[key] or nil
-        QueueRefresh()
-    elseif row.questID and not InCombatLockdown() and C_QuestLog.GetQuestWatchType(row.questID) then
-        QuestMapFrame_OpenToQuestDetails(row.questID)
+        if mouseButton == "LeftButton" then
+            local key = row.zoneKey
+            collapsedZones[key] = not collapsedZones[key] or nil
+            if InCombatLockdown() then
+                RedrawCachedGroups()
+            else
+                QueueRefresh()
+            end
+        end
+        return
+    end
+
+    local questID = row.questID
+    if not IsCurrentQuestRow(row, questID) then
+        return
+    end
+    if mouseButton == "RightButton" then
+        OpenQuestMenu(row, questID)
+    elseif mouseButton == "LeftButton" and C_QuestLog.GetQuestWatchType(questID) then
+        if InCombatLockdown() then
+            -- Blizzard's tracker reads the native details field written by the map helper.
+            pendingMapQuestID = questID
+        else
+            OpenQuestDetails(questID)
+        end
     end
 end
 
@@ -62,7 +143,7 @@ end
 
 local function CreateRow(parent)
     local row = CreateFrame("Button", nil, parent)
-    row:RegisterForClicks("LeftButtonUp")
+    row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     row:SetScript("OnClick", OnRowClick)
 
     row.background = row:CreateTexture(nil, "BACKGROUND")
@@ -241,8 +322,9 @@ local function CreateSection(container, stock)
     view:SetScript("OnSizeChanged", InvalidateViewport)
     view:EnableMouseWheel(true)
     view:SetScript("OnMouseWheel", function(self, delta)
-        if not InCombatLockdown() then
-            UpdateScroll(module, self:GetVerticalScroll() - delta * 38)
+        UpdateScroll(module, self:GetVerticalScroll() - delta * 38)
+        if InCombatLockdown() and #module.itemButtons > 0 then
+            addon.UpdateItemButtons(module, 0)
         end
     end)
     module.view = view
@@ -261,15 +343,35 @@ local function Refresh()
     if not section then
         section = CreateSection(ObjectiveTrackerFrame, QuestObjectiveTracker)
     end
-    Render(section, addon.GetGroups())
+    local groups = addon.GetGroups()
+    Render(section, groups)
+    section.groups = groups
 end
 
-local function RestoreNative(message)
+local function DisableTracker(message)
     disabled = true
     if section then
         addon.HideTracker(section)
     end
     geterrorhandler()(addonName .. ": " .. tostring(message))
+end
+
+RedrawCachedGroups = function()
+    if disabled or not section or not section.groups then
+        return
+    end
+
+    local ok, message = pcall(function()
+        Render(section, section.groups)
+        addon.PlaceTracker(section)
+        SyncViewport(section)
+        if #section.itemButtons > 0 then
+            addon.UpdateItemButtons(section, 0)
+        end
+    end)
+    if not ok then
+        DisableTracker(message)
+    end
 end
 
 QueueRefresh = function()
@@ -283,7 +385,7 @@ QueueRefresh = function()
         if not InCombatLockdown() then
             local ok, message = pcall(Refresh)
             if not ok then
-                RestoreNative(message)
+                DisableTracker(message)
             end
         end
     end)
@@ -305,12 +407,17 @@ events:SetScript("OnEvent", function(_, event, name)
     elseif event == "PLAYER_ENTERING_WORLD" then
         enteredWorld = true
     elseif event == "PLAYER_REGEN_ENABLED" and section then
+        local questID = pendingMapQuestID
+        pendingMapQuestID = nil
         if disabled then
-            -- An error during lockdown can leave a native quest module faded until combat ends.
+            -- Restore a native module whose opacity could not be restored during combat.
             addon.HideTracker(section)
             return
         end
         section.placementElapsed = PLACEMENT_INTERVAL
+        if IsInQuestLog(questID) and C_QuestLog.GetQuestWatchType(questID) then
+            OpenQuestDetails(questID)
+        end
     elseif event == "DISPLAY_SIZE_CHANGED" or event == "UI_SCALE_CHANGED" or event == "EDIT_MODE_LAYOUTS_UPDATED" then
         if section then
             section.placementElapsed = PLACEMENT_INTERVAL
@@ -333,12 +440,10 @@ events:SetScript("OnUpdate", function(_, elapsed)
             section.placementElapsed = 0
             local ok, message = pcall(addon.PlaceTracker, section)
             if not ok then
-                RestoreNative(message)
+                DisableTracker(message)
             end
         end
-        if not InCombatLockdown() then
-            SyncViewport(section)
-        end
+        SyncViewport(section)
     end
     if #section.itemButtons > 0 then
         addon.UpdateItemButtons(section, elapsed)
