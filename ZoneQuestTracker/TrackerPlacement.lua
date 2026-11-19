@@ -53,6 +53,7 @@ end
 
 function addon.HideTracker(section)
     section:Hide()
+    addon.HideMapClicker(section)
     local inCombat = InCombatLockdown()
     for _, entry in pairs(section.stockQuests) do
         RestoreStock(entry, inCombat)
@@ -138,7 +139,8 @@ function addon.PlaceTracker(section)
             end
         end
     end)
-    local height = math.min(section.fullHeight, (first.top - bottom) / first.scale)
+    local availableHeight = (first.top - bottom) / first.scale
+    local height = math.min(section.fullHeight, availableHeight)
     if height <= 0 then
         addon.HideTracker(section)
         return
@@ -156,4 +158,6 @@ function addon.PlaceTracker(section)
             RestoreStock(entry, inCombat)
         end
     end
+    addon.PlaceMapClicker(section, first.left - rootLeft, first.top - rootBottom,
+        section:GetWidth() - 8, availableHeight, first.scale)
 end

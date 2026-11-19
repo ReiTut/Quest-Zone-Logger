@@ -2,14 +2,25 @@ local addonName, addon = ...
 
 local events = CreateFrame("Frame")
 local section, collapsedZones
-local enteredWorld, refreshQueued, disabled
+local enteredWorld, refreshQueued, progressQueued, disabled
 local QueueRefresh, RedrawCachedGroups
-local pendingMapQuestID
+local clickedMapQuestID
+-- Combat title clicks select this quest in the addon's own circles. Native
+-- super-tracking, and the map location if the map is still open, follow after
+-- combat, so Blizzard's map and quest log update on their own secure paths.
+local pendingFocusQuestID
 local PLACEMENT_INTERVAL = 0.10
 local FOCUS_BUTTON_SIZE = 22
 local SCROLL_LEFT_GUTTER = 24
 local ZONE_QUEST_PADDING = 14
 local QUEST_ITEM_INSET = addon.QuestItemSize + 6
+local progressEvents = {
+    QUEST_DATA_LOAD_RESULT = true,
+    QUEST_LOG_UPDATE = true,
+    QUEST_LOG_CRITERIA_UPDATE = true,
+    QUEST_WATCH_UPDATE = true,
+    PLAYER_MONEY = true,
+}
 
 local function IsInQuestLog(questID)
     if not questID then
@@ -23,11 +34,10 @@ local function IsCurrentQuestRow(row, questID)
     return row.questID == questID and row:IsVisible() and IsInQuestLog(questID)
 end
 
-local function OpenQuestDetails(questID)
-    if QuestLogPopupDetailFrame and QuestLogPopupDetailFrame:IsShown() then
-        HideUIPanel(QuestLogPopupDetailFrame)
+local function FocusQuest(questID)
+    if C_SuperTrack.GetSuperTrackedQuestID() ~= questID then
+        C_SuperTrack.SetSuperTrackedQuestID(questID)
     end
-    QuestMapFrame_OpenToQuestDetails(questID)
 end
 
 local function OpenQuestMenu(row, questID)
@@ -93,10 +103,19 @@ local function OnRowClick(row, mouseButton)
         OpenQuestMenu(row, questID)
     elseif mouseButton == "LeftButton" and C_QuestLog.GetQuestWatchType(questID) then
         if InCombatLockdown() then
-            -- Blizzard's tracker reads the native details field written by the map helper.
-            pendingMapQuestID = questID
-        else
-            OpenQuestDetails(questID)
+            -- The secure delegate opens a closed map natively. Leave Blizzard's
+            -- map, quest log, and super-tracking untouched until combat ends.
+            clickedMapQuestID = nil
+            pendingFocusQuestID = questID
+            RedrawCachedGroups()
+            return
+        end
+        pendingFocusQuestID = nil
+        clickedMapQuestID = questID
+        FocusQuest(questID)
+        if addon.IsQuestMapShown() or not section.mapClicker then
+            addon.OpenQuestLocation(questID)
+            clickedMapQuestID = nil
         end
     end
 end
@@ -104,6 +123,7 @@ end
 local function CreateFocusButton(row)
     local button = CreateFrame("Button", nil, row, "POIButtonTemplate")
     button:SetSize(FOCUS_BUTTON_SIZE, FOCUS_BUTTON_SIZE)
+    button:SetFrameLevel(row:GetFrameLevel() + 2)
     button:SetPoint("TOPLEFT", row, "TOPLEFT", 5, 0)
     button:RegisterForClicks("LeftButtonUp")
     -- The section already refreshes focus on SUPER_TRACKING_CHANGED.
@@ -142,9 +162,17 @@ local function UpdateFocusButton(row, quest, focusedQuestID)
 end
 
 local function CreateRow(parent)
-    local row = CreateFrame("Button", nil, parent)
+    local row = CreateFrame("Button", nil, parent, "InsecureMouseClicksPropagatorTemplate")
     row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     row:SetScript("OnClick", OnRowClick)
+
+    local blocker = CreateFrame("Button", nil, row)
+    blocker:SetAllPoints()
+    blocker:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    blocker:SetScript("OnClick", function(_, button)
+        OnRowClick(row, button)
+    end)
+    row.mouseBlocker = blocker
 
     row.background = row:CreateTexture(nil, "BACKGROUND")
     row.background:SetAllPoints()
@@ -167,9 +195,25 @@ local function Render(module, groups)
     local width = module:GetWidth() - 8
     local index, y = 0, 0
     local showFocusButtons = GetCVarBool("questPOI")
-    local focusedQuestID = showFocusButtons and C_SuperTrack.GetSuperTrackedQuestID()
+    local focusedQuestID = showFocusButtons and (pendingFocusQuestID or C_SuperTrack.GetSuperTrackedQuestID())
     local titleIndent = showFocusButtons and 30 or 12
     local objectiveIndent = showFocusButtons and 40 or 25
+    local gapIndex = 0
+
+    local function AddGap(height)
+        gapIndex = gapIndex + 1
+        local gap = module.gaps[gapIndex]
+        if not gap then
+            gap = CreateFrame("Frame", nil, child)
+            gap:EnableMouse(true)
+            module.gaps[gapIndex] = gap
+        end
+        gap:ClearAllPoints()
+        gap:SetPoint("TOPLEFT", child, "TOPLEFT", SCROLL_LEFT_GUTTER, -y)
+        gap:SetSize(width, height)
+        gap:Show()
+        y = y + height
+    end
 
     local function AddRow(text, indent, zoneKey, quest, complete, itemQuest)
         index = index + 1
@@ -180,8 +224,9 @@ local function Render(module, groups)
         end
 
         row.zoneKey, row.questID = zoneKey, quest and quest.id
+        addon.UpdateQuestClickMask(row)
         row.background:SetShown(zoneKey ~= nil)
-        row:EnableMouse(zoneKey ~= nil or quest ~= nil)
+        row:EnableMouse(true)
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", child, "TOPLEFT", SCROLL_LEFT_GUTTER, -y)
         row:SetWidth(width)
@@ -222,7 +267,7 @@ local function Render(module, groups)
         if not collapsed then
             -- The selected marker's glow extends above its button.
             if showFocusButtons then
-                y = y + ZONE_QUEST_PADDING
+                AddGap(ZONE_QUEST_PADDING)
             end
             for _, quest in ipairs(group.quests) do
                 local title = quest.title
@@ -236,28 +281,33 @@ local function Render(module, groups)
                     AddRow(text, objectiveIndent, nil, nil, complete, itemQuest)
                     itemQuest = nil
                 end
-                for _, objective in ipairs(quest.objectives) do
-                    if objective.text and objective.text ~= "" then
-                        AddDescription(objective.text, objective.finished)
-                    end
-                end
-                if quest.moneyText then
-                    AddDescription(quest.moneyText)
-                end
                 if quest.ready then
+                    -- A completed quest shows only its turn-in status.
                     AddDescription(QUEST_WATCH_QUEST_READY or "Ready for turn-in", true)
+                else
+                    for _, objective in ipairs(quest.objectives) do
+                        if objective.text and objective.text ~= "" then
+                            AddDescription(objective.text, objective.finished)
+                        end
+                    end
+                    if quest.moneyText then
+                        AddDescription(quest.moneyText)
+                    end
                 end
                 if itemQuest then
                     AddDescription("")
                 end
             end
         end
-        y = y + 4
+        AddGap(4)
     end
 
     for i = index + 1, #rows do
         addon.UpdateItemButton(module, rows[i])
         rows[i]:Hide()
+    end
+    for i = gapIndex + 1, #module.gaps do
+        module.gaps[i]:Hide()
     end
     module.fullHeight = y
     module.placementElapsed = PLACEMENT_INTERVAL
@@ -306,7 +356,7 @@ local function CreateSection(container, stock)
     if campaign then
         module.stockQuests[campaign] = { stock = campaign }
     end
-    module.rows = {}
+    module.rows, module.gaps = {}, {}
     module.placementElapsed = 0
     module.itemButtons, module.itemElapsed = {}, 0
     module.contentsHeight, module.fullHeight = 0, 0
@@ -336,6 +386,14 @@ local function CreateSection(container, stock)
     module.thumb:SetWidth(2)
     module.thumb:Hide()
 
+    addon.CreateMapClicker(module, function()
+        local questID = clickedMapQuestID
+        clickedMapQuestID = nil
+        if IsInQuestLog(questID) and C_QuestLog.GetQuestWatchType(questID) then
+            addon.OpenQuestLocation(questID)
+        end
+    end)
+
     return module
 end
 
@@ -356,12 +414,15 @@ local function DisableTracker(message)
     geterrorhandler()(addonName .. ": " .. tostring(message))
 end
 
-RedrawCachedGroups = function()
+RedrawCachedGroups = function(updateProgress)
     if disabled or not section or not section.groups then
         return
     end
 
     local ok, message = pcall(function()
+        if updateProgress and not addon.RefreshQuestProgress(section.groups) then
+            return
+        end
         Render(section, section.groups)
         addon.PlaceTracker(section)
         SyncViewport(section)
@@ -374,15 +435,27 @@ RedrawCachedGroups = function()
     end
 end
 
-QueueRefresh = function()
-    if disabled or not enteredWorld or not collapsedZones or refreshQueued or InCombatLockdown() then
+QueueRefresh = function(updateProgress)
+    if disabled or not enteredWorld or not collapsedZones or (InCombatLockdown() and not updateProgress) then
+        return
+    end
+    progressQueued = progressQueued or updateProgress
+    if refreshQueued then
         return
     end
 
     refreshQueued = true
     C_Timer.After(0, function()
-        refreshQueued = false
-        if not InCombatLockdown() then
+        local refreshProgress = progressQueued
+        refreshQueued, progressQueued = false, nil
+        if disabled then
+            return
+        end
+        if InCombatLockdown() then
+            if refreshProgress then
+                RedrawCachedGroups(true)
+            end
+        else
             local ok, message = pcall(Refresh)
             if not ok then
                 DisableTracker(message)
@@ -406,18 +479,31 @@ events:SetScript("OnEvent", function(_, event, name)
         events:UnregisterEvent("ADDON_LOADED")
     elseif event == "PLAYER_ENTERING_WORLD" then
         enteredWorld = true
+    elseif event == "SUPER_TRACKING_CHANGED" and InCombatLockdown() then
+        -- A native focus change during combat replaces a pending title selection.
+        if pendingFocusQuestID then
+            pendingFocusQuestID = nil
+            RedrawCachedGroups()
+        end
+        return
     elseif event == "PLAYER_REGEN_ENABLED" and section then
-        local questID = pendingMapQuestID
-        pendingMapQuestID = nil
+        clickedMapQuestID = nil
+        local questID = pendingFocusQuestID
+        pendingFocusQuestID = nil
+        if questID and IsInQuestLog(questID) and C_QuestLog.GetQuestWatchType(questID) then
+            if addon.IsQuestMapShown() then
+                -- Show the last quest clicked in combat on the map that is still open.
+                addon.OpenQuestLocation(questID)
+            else
+                FocusQuest(questID)
+            end
+        end
         if disabled then
             -- Restore a native module whose opacity could not be restored during combat.
             addon.HideTracker(section)
             return
         end
         section.placementElapsed = PLACEMENT_INTERVAL
-        if IsInQuestLog(questID) and C_QuestLog.GetQuestWatchType(questID) then
-            OpenQuestDetails(questID)
-        end
     elseif event == "DISPLAY_SIZE_CHANGED" or event == "UI_SCALE_CHANGED" or event == "EDIT_MODE_LAYOUTS_UPDATED" then
         if section then
             section.placementElapsed = PLACEMENT_INTERVAL
@@ -427,7 +513,7 @@ events:SetScript("OnEvent", function(_, event, name)
     elseif event == "CVAR_UPDATE" and name:lower() ~= "questpoi" then
         return
     end
-    QueueRefresh()
+    QueueRefresh(progressEvents[event])
 end)
 
 events:SetScript("OnUpdate", function(_, elapsed)

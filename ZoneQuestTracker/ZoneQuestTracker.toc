@@ -9,5 +9,6 @@
 
 Quests.lua
 QuestItems.lua
+QuestMap.lua
 TrackerPlacement.lua
 Tracker.lua

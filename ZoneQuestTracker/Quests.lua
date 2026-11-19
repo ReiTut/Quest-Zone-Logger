@@ -54,11 +54,54 @@ function addon.GetQuestItem(questID)
     end
 end
 
-local function ReadQuest(questID, money)
+local function ReadQuestProgress(questID, money)
     local ready = C_QuestLog.ReadyForTurnIn(questID)
     if ready == nil then
         ready = C_QuestLog.IsComplete(questID)
     end
+
+    local moneyText
+    local requiredMoney = C_QuestLog.GetRequiredMoney(questID)
+    if requiredMoney and requiredMoney > money and not ready then
+        moneyText = GetMoneyString(money) .. " / " .. GetMoneyString(requiredMoney)
+    end
+
+    return ready, C_QuestLog.GetQuestObjectives(questID), moneyText
+end
+
+local function SameObjectives(previous, current)
+    if #previous ~= #current then
+        return false
+    end
+    for index, objective in ipairs(current) do
+        local old = previous[index]
+        if objective.text ~= old.text or objective.finished ~= old.finished then
+            return false
+        end
+    end
+    return true
+end
+
+function addon.RefreshQuestProgress(groups)
+    local money = GetMoney()
+    local changed = false
+    for _, group in ipairs(groups) do
+        for _, quest in ipairs(group.quests) do
+            if C_QuestLog.IsOnQuest(quest.id) then
+                local ready, objectives, moneyText = ReadQuestProgress(quest.id, money)
+                objectives = objectives or quest.objectives
+                if quest.ready ~= ready or quest.moneyText ~= moneyText or not SameObjectives(quest.objectives, objectives) then
+                    quest.ready, quest.objectives, quest.moneyText = ready, objectives, moneyText
+                    changed = true
+                end
+            end
+        end
+    end
+    return changed
+end
+
+local function ReadQuest(questID, money)
+    local ready, objectives, moneyText = ReadQuestProgress(questID, money)
 
     local logIndex = C_QuestLog.GetLogIndexForQuestID(questID)
     local info = logIndex and C_QuestLog.GetInfo(logIndex)
@@ -70,18 +113,12 @@ local function ReadQuest(questID, money)
         title = RETRIEVING_DATA or "Loading..."
     end
 
-    local moneyText
-    local requiredMoney = C_QuestLog.GetRequiredMoney(questID)
-    if requiredMoney and requiredMoney > money and not ready then
-        moneyText = GetMoneyString(money) .. " / " .. GetMoneyString(requiredMoney)
-    end
-
     return {
         id = questID,
         title = title,
         level = info and info.level,
         ready = ready,
-        objectives = C_QuestLog.GetQuestObjectives(questID) or {},
+        objectives = objectives or {},
         item = addon.GetQuestItem(questID),
         moneyText = moneyText,
     }

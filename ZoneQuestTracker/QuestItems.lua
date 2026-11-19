@@ -176,7 +176,7 @@ function addon.UpdateItemButtons(section, elapsed)
                 action:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
                 action:SetSize(size, size)
                 action:SetFrameStrata(marker:GetFrameStrata())
-                action:SetFrameLevel(marker:GetFrameLevel() + 1)
+                action:SetFrameLevel(marker:GetFrameLevel() + 2)
                 button.blocker:SetFrameLevel(action:GetFrameLevel() + 1)
                 action:SetAttribute("item1", "item:" .. button.item.id)
                 button.left, button.top, button.size = left, top, size
