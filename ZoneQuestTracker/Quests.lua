@@ -54,11 +54,16 @@ function addon.GetQuestItem(questID)
     end
 end
 
-local function ReadQuestProgress(questID, money)
+function addon.IsQuestReady(questID)
     local ready = C_QuestLog.ReadyForTurnIn(questID)
     if ready == nil then
         ready = C_QuestLog.IsComplete(questID)
     end
+    return ready
+end
+
+local function ReadQuestProgress(questID, money)
+    local ready = addon.IsQuestReady(questID)
 
     local moneyText
     local requiredMoney = C_QuestLog.GetRequiredMoney(questID)
@@ -142,6 +147,22 @@ function addon.GetGroups()
             end
             group.quests[#group.quests + 1] = ReadQuest(questID, money)
         end
+    end
+
+    -- List completed quests first in each zone. Keep the watch order otherwise;
+    -- table.sort is not stable, so compare original positions to break ties.
+    for _, group in ipairs(groups) do
+        local position = {}
+        for index, quest in ipairs(group.quests) do
+            position[quest] = index
+        end
+        table.sort(group.quests, function(a, b)
+            local aReady, bReady = a.ready and 1 or 0, b.ready and 1 or 0
+            if aReady ~= bReady then
+                return aReady > bReady
+            end
+            return position[a] < position[b]
+        end)
     end
 
     table.sort(groups, function(a, b)

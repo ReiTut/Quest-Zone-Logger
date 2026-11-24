@@ -120,6 +120,36 @@ local function OnRowClick(row, mouseButton)
     end
 end
 
+-- Same native tooltip Blizzard's tracker shows on quest headers while grouped,
+-- plus progress shared by party members who run this addon.
+local hoverOwner, hoverRow
+local function ShowPartyProgress(owner, row)
+    local questID = row.questID
+    if not IsInGroup() or not IsCurrentQuestRow(row, questID) then
+        return
+    end
+    hoverOwner, hoverRow = owner, row
+    GameTooltip:ClearAllPoints()
+    GameTooltip:SetPoint("TOPRIGHT", owner, "TOPLEFT", 0, 0)
+    GameTooltip:SetOwner(owner, "ANCHOR_PRESERVE")
+    GameTooltip:SetQuestPartyProgress(questID)
+    addon.AddPartyProgress(GameTooltip, questID)
+    addon.RequestPartyProgress(questID)
+end
+
+-- Redraw the open tooltip when a party member's answer arrives.
+function addon.OnPartyProgress(questID)
+    if hoverRow and hoverRow.questID == questID and GameTooltip:IsOwned(hoverOwner) then
+        ShowPartyProgress(hoverOwner, hoverRow)
+    end
+end
+
+local function HidePartyProgress(owner)
+    if GameTooltip:IsOwned(owner) then
+        GameTooltip:Hide()
+    end
+end
+
 local function CreateFocusButton(row)
     local button = CreateFrame("Button", nil, row, "POIButtonTemplate")
     button:SetSize(FOCUS_BUTTON_SIZE, FOCUS_BUTTON_SIZE)
@@ -165,13 +195,22 @@ local function CreateRow(parent)
     local row = CreateFrame("Button", nil, parent, "InsecureMouseClicksPropagatorTemplate")
     row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     row:SetScript("OnClick", OnRowClick)
+    row:SetScript("OnEnter", function(self)
+        ShowPartyProgress(self, self)
+    end)
+    row:SetScript("OnLeave", HidePartyProgress)
 
+    -- The blocker covers the row while the map is open, so it takes the hover too.
     local blocker = CreateFrame("Button", nil, row)
     blocker:SetAllPoints()
     blocker:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     blocker:SetScript("OnClick", function(_, button)
         OnRowClick(row, button)
     end)
+    blocker:SetScript("OnEnter", function(self)
+        ShowPartyProgress(self, row)
+    end)
+    blocker:SetScript("OnLeave", HidePartyProgress)
     row.mouseBlocker = blocker
 
     row.background = row:CreateTexture(nil, "BACKGROUND")
@@ -262,7 +301,17 @@ local function Render(module, groups)
 
     for _, group in ipairs(groups) do
         local collapsed = collapsedZones[group.key]
-        local label = ("%s  %s (%d)"):format(collapsed and "+" or "-", group.name, #group.quests)
+        local ready = 0
+        for _, quest in ipairs(group.quests) do
+            if quest.ready then
+                ready = ready + 1
+            end
+        end
+        local count = tostring(#group.quests)
+        if ready > 0 then
+            count = ("%d, %d ready"):format(#group.quests, ready)
+        end
+        local label = ("%s  %s (%s)"):format(collapsed and "+" or "-", group.name, count)
         AddRow(label, 6, group.key)
         if not collapsed then
             -- The selected marker's glow extends above its button.

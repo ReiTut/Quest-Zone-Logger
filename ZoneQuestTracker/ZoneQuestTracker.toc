@@ -3,7 +3,7 @@
 ## Notes: Groups the Objective Tracker's watched quests by quest log zone.
 ## Category: Quests
 ## IconTexture: Interface\AddOns\ZoneQuestTracker\Icon.tga
-## Version: 1.0.12
+## Version: 1.0.13
 ## Dependencies: Blizzard_ObjectiveTracker
 ## SavedVariablesPerCharacter: ZoneQuestTrackerDB
 
@@ -12,3 +12,4 @@ QuestItems.lua
 QuestMap.lua
 TrackerPlacement.lua
 Tracker.lua
+PartyProgress.lua
