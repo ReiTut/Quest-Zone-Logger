@@ -24,7 +24,7 @@ The addon targets **WoW Forever 1.60.1 (Camelot)**, interface `16001`.
 | **Quest-item icon** | Hover over an active shortcut to identify the item. Left-click to use it from the tracker. In combat, existing buttons work while their icon stays in place and the game allows the item. New or moved shortcuts bind after combat. |
 | **Mouse wheel** | Scroll when the list fills the available tracker space. |
 
-Use Blizzard’s quest log to track quests that aren’t in the tracker. ZoneQuestTracker updates objective counts and turn-in status during combat. A completed quest shows a single **Ready for turn-in** line below its title and is listed first in its zone. Each watched quest appears once, under its quest-log category, its destination zone, or **Other**.
+Use Blizzard’s quest log to track quests that aren’t in the tracker. ZoneQuestTracker updates objective counts and turn-in status during combat. A completed quest shows a single **Ready for turn-in** line, marked with a green check, below its title and is listed first in its zone. Each watched quest appears once, under its quest-log category, its destination zone, or **Other**.
 
 If you use ForeverCore, turn off its **Forever quest list** setting to avoid a duplicate quest list.
 

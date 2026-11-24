@@ -332,7 +332,9 @@ local function Render(module, groups)
                 end
                 if quest.ready then
                     -- A completed quest shows only its turn-in status.
-                    AddDescription(QUEST_WATCH_QUEST_READY or "Ready for turn-in", true)
+                    -- Size 0 scales Blizzard's ready-check icon to the line's font height.
+                    AddDescription("|TInterface\\RaidFrame\\ReadyCheck-Ready:0|t "
+                        .. (QUEST_WATCH_QUEST_READY or "Ready for turn-in"), true)
                 else
                     for _, objective in ipairs(quest.objectives) do
                         if objective.text and objective.text ~= "" then
